@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: auth
+data:
+  APP_ENV: "production"
+
+  # Wins over server.port in the embedded production.yaml (config.go reads PORT
+  # last). Set explicitly so the manifest, not the baked-in config, owns the port.
+  PORT: "9999"
+
+  # 127.0.0.1 is the cloud-sql-proxy sidecar, not Cloud SQL. sslmode=disable is
+  # correct and not a weakening: this hop is loopback inside the pod, and the
+  # proxy makes the TLS connection to Cloud SQL itself.
+  DB_HOST: "127.0.0.1"
+  DB_PORT: "5432"
+  DB_USER: "postgres"
+  DB_NAME: "recommendations-backend"
+  DB_SSLMODE: "disable"
+
+  # Phase 1 placeholders. Phase 2 replaces both with the real https:// hostname.
+  # FRONTEND_URL does double duty: post-login redirect target AND the single
+  # allowed CORS origin (main.go).
+  BASE_URL: "http://localhost:9999"
+  FRONTEND_URL: "http://localhost:5173"
+
+  SESSION_TTL: "12h"
+  SESSION_IDLE_TTL: "30m"

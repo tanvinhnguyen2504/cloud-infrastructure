@@ -1,0 +1,6 @@
+# Never commit rendered secrets or local kubeconfig fragments.
+*.secret.yaml
+secret-*.yaml
+key.json
+*.key
+.DS_Store

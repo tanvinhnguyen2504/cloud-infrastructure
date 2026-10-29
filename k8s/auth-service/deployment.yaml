@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: auth
+  labels:
+    app: auth-service
+spec:
+  # One node (e2-medium, ~940m allocatable CPU) means one replica. Raise this
+  # only after the node pool grows.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  # maxUnavailable MUST be 1 here, not 0. With replicas: 1 on a single e2-medium
+  # whose system pods already request ~700m of 940m, there is not room for two
+  # copies of this pod at once. maxUnavailable: 0 + maxSurge: 1 deadlocks: the old
+  # pod cannot be removed until the new one is Ready, and the new one cannot even
+  # be scheduled until the old one is removed ("Insufficient cpu", Pending
+  # forever). Scale down first, then up. Revisit only when the node pool grows.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      serviceAccountName: auth-service
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      # cloud-sql-proxy is a NATIVE sidecar (initContainer + restartPolicy:
+      # Always), not an ordinary container. This is load-bearing: main.go pings
+      # the database at startup and log.Fatalf's if it cannot connect. A plain
+      # sidecar starts in parallel with the app, so the app can lose the race and
+      # crashloop against a port nobody is listening on yet. A native sidecar is
+      # guaranteed started before the app container begins.
+      initContainers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+          restartPolicy: Always
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            # The DB port stays bound to loopback. The health server is what
+            # kubelet probes, so it alone listens on the pod IP -- exposing
+            # /startup is safe in a way that exposing the tunnel would not be.
+            - "--health-check"
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
+            - "vincent-mini-apps-project:asia-southeast1:recommendations-app-instance"
+          # No --credentials-file: Workload Identity supplies the token via the
+          # bound KSA. A key file here would defeat the point of enabling WI.
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          # NOT tcpSocket on 5432: kubelet probes from outside the pod's
+          # network namespace, so it dials the pod IP, while the proxy binds
+          # 127.0.0.1 only. That probe can never pass -- it killed this
+          # container every 2 minutes and the app never started.
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 9090
+            periodSeconds: 2
+            failureThreshold: 30
+
+      containers:
+        - name: auth-service
+          # Pinned by digest, not just tag: a tag can be moved, and a moved tag
+          # makes `kubectl rollout undo` meaningless.
+          image: asia-southeast1-docker.pkg.dev/vincent-mini-apps-project/auth-repository/auth-service:0.0.1@sha256:2e3283ac96b1b8ca9803fdf6d175be3621976ddc60c51f317289ea91f5ca8ec3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9999
+          envFrom:
+            - configMapRef:
+                name: auth-service-config
+            - secretRef:
+                name: auth-service-secrets
+          securityContext:
+            # runAsUser is deliberately unset: the distroless :nonroot tag
+            # already sets numeric 65532, which is what lets runAsNonRoot be
+            # verified. Restating it as a name would break that check.
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # /api/v1/health is safe to probe: the CSRF middleware exempts GET, and
+          # the handler deliberately does not touch the database, so one slow
+          # query cannot evict a healthy pod.
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3

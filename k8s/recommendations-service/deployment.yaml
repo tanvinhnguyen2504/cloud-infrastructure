@@ -59,7 +59,10 @@ spec:
               drop: ["ALL"]
           resources:
             requests:
-              cpu: 50m
+              # Halved with the app container's request to fit the node; 25m + 50m
+              # = 75m against 87m free. The proxy is near-idle once the pool is
+              # established and can still burst to the 200m limit during startup.
+              cpu: 25m
               memory: 64Mi
             limits:
               cpu: 200m
@@ -76,10 +79,7 @@ spec:
 
       containers:
         - name: recommendations-service
-          # Append @sha256:<digest> as soon as the image is pushed (deploy.md
-          # step 6). IfNotPresent is only safe while the reference is immutable,
-          # and a moved tag makes `kubectl rollout undo` meaningless.
-          image: asia-southeast1-docker.pkg.dev/vincent-mini-apps-project/recommendations-repository/recommendations-service:0.0.1
+          image: asia-southeast1-docker.pkg.dev/vincent-mini-apps-project/recommendations-repository/recommendations-service:0.0.1@sha256:33346e43942262776839baf60e837c4d6bd265b50d12197091eba3e163c21ae1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -101,7 +101,7 @@ spec:
               drop: ["ALL"]
           resources:
             requests:
-              cpu: 100m
+              cpu: 50m
               memory: 128Mi
             limits:
               cpu: 500m

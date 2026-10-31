@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendations-service
+spec:
+  # Phase 1 only. Each LoadBalancer is its own forwarding rule and billed IP --
+  # the Phase 2 shape is NodePort behind one shared GKE Ingress.
+  type: LoadBalancer
+  selector:
+    app: recommendations-service
+  ports:
+    - name: http
+      port: 80
+      # By name: changing the container port needs no edit here.
+      targetPort: http
+      protocol: TCP

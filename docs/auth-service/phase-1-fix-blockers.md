@@ -285,7 +285,7 @@ name that a future Ingress must target — so only `type` is in question:
 | --- | --- | --- |
 | No external IP for now | `type: ClusterIP` | reach it with `kubectl -n auth port-forward svc/auth-service 8080:80` |
 | Keep the public IP for now | leave `type: LoadBalancer` | ✅ **chosen** — current state |
-| Phase 2 (Ingress + managed TLS) | `type: NodePort` | per `docs/phase-2-domain-tls-oauth.md` §2.5 |
+| Phase 2 (Ingress + managed TLS) | `type: NodePort` | per `docs/auth-service/phase-2-domain-tls-oauth.md` §2.5 |
 
 If the cluster's `httpLoadBalancing` addon has been disabled, Phase 2's GKE Ingress will not
 provision at all and `phase-2-domain-tls-oauth.md:161` is wrong. Check with:

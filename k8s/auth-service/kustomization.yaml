@@ -11,7 +11,7 @@ resources:
   - service.yaml
 
 # auth-service-secrets is deliberately NOT here. It is created imperatively with
-# `kubectl create secret` (see docs/phase-1-deploy.md) so that no credential ever
+# `kubectl create secret` (see docs/auth-service/deploy.md) so that no credential ever
 # lands in this repository.
 
 labels:

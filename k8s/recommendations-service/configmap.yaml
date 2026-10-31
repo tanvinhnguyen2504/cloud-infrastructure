@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: recommendations-service-config
+  namespace: recommendations
+data:
+  APP_ENV: "production"
+  PORT: "9998"
+
+  # 127.0.0.1 is the cloud-sql-proxy sidecar, not Cloud SQL. sslmode=disable is
+  # correct: this hop is loopback inside the pod, and the proxy makes the TLS
+  # connection to Cloud SQL itself.
+  DB_HOST: "127.0.0.1"
+  DB_PORT: "5432"
+  DB_USER: "postgres"
+  DB_NAME: "recommendations-backend"
+  DB_SSLMODE: "disable"
+  BASE_URL: "http://localhost:9998"
+  FRONTEND_URL: "http://localhost:5173"

@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendations-service
+  namespace: recommendations
+  labels:
+    app: recommendations-service
+spec:
+  # One node's worth of CPU is already spoken for by system pods + auth-service.
+  # Raise only after the node pool grows -- see prerequisites.md §3.2.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommendations-service
+  # maxUnavailable MUST be 1 here, not 0: two copies of this pod do not fit on
+  # one e2-medium, and 0/1 deadlocks (the old pod cannot go until the new one is
+  # Ready, the new one cannot schedule until the old one goes). Flip to 0/1 once
+  # the node pool has room.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  template:
+    metadata:
+      labels:
+        app: recommendations-service
+    spec:
+      serviceAccountName: recommendations-service
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      # cloud-sql-proxy is a NATIVE sidecar (initContainer + restartPolicy:
+      # Always), not an ordinary container. Load-bearing: db.Connect pings the
+      # pool and main.go log.Fatalf's on failure, so a plain sidecar lets the app
+      # lose the startup race and crashloop. Needs Kubernetes 1.29+.
+      initContainers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+          restartPolicy: Always
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            # The DB port stays on loopback. The health server is what kubelet
+            # probes, so it alone listens on the pod IP.
+            - "--health-check"
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
+            - "vincent-mini-apps-project:asia-southeast1:recommendations-app-instance"
+          # No --credentials-file: Workload Identity supplies the token via the
+          # bound KSA.
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          # NOT tcpSocket on 5432: kubelet dials the pod IP from outside the
+          # pod's network namespace, while the proxy binds 127.0.0.1 only -- that
+          # probe can never pass.
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 9090
+            periodSeconds: 2
+            failureThreshold: 30
+
+      containers:
+        - name: recommendations-service
+          # Append @sha256:<digest> as soon as the image is pushed (deploy.md
+          # step 6). IfNotPresent is only safe while the reference is immutable,
+          # and a moved tag makes `kubectl rollout undo` meaningless.
+          image: asia-southeast1-docker.pkg.dev/vincent-mini-apps-project/recommendations-repository/recommendations-service:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9998
+          envFrom:
+            - configMapRef:
+                name: recommendations-service-config
+            # Four keys, all required by config.Load() even though only
+            # DB_PASSWORD is used at runtime.
+            - secretRef:
+                name: recommendations-service-secrets
+          securityContext:
+            # runAsUser is deliberately unset: the distroless :nonroot tag
+            # already sets numeric 65532, which is what lets runAsNonRoot be
+            # verified. Restating it as a name would break that check.
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # /api/v1/health only marshals config strings and never touches the
+          # database, so a slow gm_places query cannot evict a healthy pod -- and
+          # a green probe says nothing about the schema. CORS does not interfere:
+          # kubelet sends no Origin header.
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
